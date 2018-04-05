@@ -27,12 +27,68 @@ class TheatersMapViewController: UIViewController {
         
         mapView.delegate = self
         
-        loadXML()
+        //loadXML()
+        showAddress("Avenida Paulista, 1106, São Paulo")
+        
         
         requestUserLocationAuthorization()
     }
     
+    func showAddress(_ address: String) {
+        let geoCoder = CLGeocoder()
+        geoCoder.geocodeAddressString(address) { (placemarks, error) in
+            if error == nil {
+                guard let placemarks = placemarks else {return}
+                guard let placemark = placemarks.first else {return}
+                guard let coordinate = placemark.location?.coordinate else {return}
+                
+                
+                
+                
+                let annotation = MKPointAnnotation()
+                annotation.title = placemark.postalCode ?? "---"
+                annotation.coordinate = coordinate
+                self.mapView.addAnnotation(annotation)
+                
+                let region = MKCoordinateRegionMakeWithDistance(coordinate, 400, 400)
+                self.mapView.setRegion(region, animated: true)
+            }
+        }
+    }
+    
+    
     // MARK: - Methods
+    /// Recupera a rota entre a localização do usuário e o destino escolhido
+    ///
+    /// - Parameter destination: Objeto CLLocationCoordinate2D contendo o destino
+    func getRoute(destination: CLLocationCoordinate2D) {
+        let request = MKDirectionsRequest()
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: locationManager.location!.coordinate))
+        
+        let directions = MKDirections(request: request)
+        directions.calculate { (response, error) in
+            if error == nil {
+                guard let response = response else {return}
+                let routes = response.routes.sorted(by: {$0.expectedTravelTime < $1.expectedTravelTime})
+                guard let route = routes.first else {return}
+                print("Nome da rota:", route.name)
+                print("Distância:", route.distance)
+                print("Duração:", route.expectedTravelTime)
+                print("Tipo de Transporte:", route.transportType)
+                
+                for step in route.steps {
+                    print("Em \(step.distance) metros, \(step.instructions)")
+                }
+                
+                self.mapView.removeOverlays(self.mapView.overlays)
+                self.mapView.add(route.polyline, level: .aboveRoads)
+                self.mapView.showAnnotations(self.mapView.annotations, animated: true)
+            }
+        }
+    }
+    
+    
     func loadXML() {
         guard let xml = Bundle.main.url(forResource: "theaters", withExtension: "xml"), let xmlParser = XMLParser(contentsOf: xml) else {return}
         xmlParser.delegate = self
@@ -43,7 +99,7 @@ class TheatersMapViewController: UIViewController {
         for theater in theaters {
             let coordinate = CLLocationCoordinate2D(latitude: theater.latitude, longitude: theater.longitude)
             
-            let annotation = TheaterAnnotation(coordinate: coordinate, title: theater.name, subtitle: theater.address)
+            let annotation = TheaterAnnotation(coordinate: coordinate, title: theater.name, subtitle: theater.url)
             
             mapView.addAnnotation(annotation)
         }
@@ -70,29 +126,6 @@ class TheatersMapViewController: UIViewController {
             }
         }
     }
-    
-    func getRoute(destination: CLLocationCoordinate2D){
-        let request = MKDirectionsRequest()
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: locationManager.location!.coordinate))
-        
-        let directions = MKDirections(request: request)
-        directions.calculate { (response, error) in
-            if(error == nil){
-                guard let response = response else {return}
-                
-                let routes = response.routes.sorted(by: {$0.expectedTravelTime < $1.expectedTravelTime})
-                guard let route = response.routes.first else {return}
-                print(route.name)
-                
-                for step in route.steps{
-                    print("Em \(step.distance) metros, \(step.instructions)")
-                }
-                
-                self.mapView.add(route.polyline, level: .aboveRoads)
-            }
-        }
-    }
 }
 
 // MARK: - XMLParserDelegate
@@ -109,7 +142,6 @@ extension TheatersMapViewController: XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        print(string)
         
         let content = string.trimmingCharacters(in: .whitespacesAndNewlines)
         if !content.isEmpty {
@@ -146,15 +178,24 @@ extension TheatersMapViewController: XMLParserDelegate {
 // MARK: - MKMapViewDelegate
 extension TheatersMapViewController: MKMapViewDelegate {
     
+    func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+        let camera = MKMapCamera()
+        camera.pitch = 80
+        camera.altitude = 100
+        camera.centerCoordinate = view.annotation!.coordinate
+        mapView.setCamera(camera, animated: true)
+    }
+    
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         if overlay is MKPolyline {
-            let renderer = MKPolylineRenderer(overlay: overlay)
             
-            renderer.strokeColor = #colorLiteral(red: 0.9254902005, green: 0.2352941185, blue: 0.1019607857, alpha: 1)
+            let renderer = MKPolylineRenderer(overlay: overlay)
+            renderer.strokeColor = #colorLiteral(red: 0.2392156869, green: 0.6745098233, blue: 0.9686274529, alpha: 1)
+            renderer.lineWidth = 7.0
             
             return renderer
-        }
-        else{
+            
+        } else {
             return MKOverlayRenderer(overlay: overlay)
         }
     }
@@ -172,18 +213,18 @@ extension TheatersMapViewController: MKMapViewDelegate {
                 annotationView.canShowCallout = true
                 
                 let btLeft = UIButton(frame: CGRect(x: 0, y: 0, width: 30, height: 30))
-                btLeft.setImage(UIImage(named:"car"), for: .normal)
+                btLeft.setImage(UIImage(named: "car"), for: .normal)
                 annotationView.leftCalloutAccessoryView = btLeft
                 
                 let btRight = UIButton(type: .detailDisclosure)
                 annotationView.rightCalloutAccessoryView = btRight
                 
-            }
-            else {
+                
+            } else {
                 annotationView.annotation = annotation
             }
-        }
-        else if annotation is MKPointAnnotation {
+            
+        } else if annotation is MKPointAnnotation {
             annotationView = mapView.dequeueReusableAnnotationView(withIdentifier: "POI")
             if annotationView == nil {
                 annotationView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: "POI")
@@ -194,21 +235,29 @@ extension TheatersMapViewController: MKMapViewDelegate {
                 annotationView.annotation = annotation
             }
         }
+        
         return annotationView
         
     }
     
     func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView, calloutAccessoryControlTapped control: UIControl) {
         
-        if control == view.leftCalloutAccessoryView{
-            //Tocamos botao esquerdo
+        if control == view.leftCalloutAccessoryView {
+            //Tocamos no botão esquerdo
             
             getRoute(destination: view.annotation!.coordinate)
-        }
-        else{
+            
+        } else {
+            
+            if let vc = storyboard?.instantiateViewController(withIdentifier: "WebViewController") as? WebViewController {
+                vc.url = view.annotation!.subtitle!
+                present(vc, animated: true, completion: nil)
+            }
             
         }
+        
     }
+    
 }
 
 extension TheatersMapViewController: CLLocationManagerDelegate {
@@ -224,13 +273,14 @@ extension TheatersMapViewController: CLLocationManagerDelegate {
     func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
         //print("Velocidade do usuário: \(userLocation.location?.speed ?? 0)")
         
-//        let region = MKCoordinateRegionMakeWithDistance(userLocation.coordinate, 500, 500)
-//        mapView.setRegion(region, animated: true)
+        //        let region = MKCoordinateRegionMakeWithDistance(userLocation.coordinate, 500, 500)
+        //        mapView.setRegion(region, animated: true)
     }
 }
 
 extension TheatersMapViewController: UISearchBarDelegate {
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        view.endEditing(true)
         let request = MKLocalSearchRequest()
         request.naturalLanguageQuery = searchBar.text!
         request.region = mapView.region
@@ -252,7 +302,6 @@ extension TheatersMapViewController: UISearchBarDelegate {
         }
     }
 }
-
 
 
 
